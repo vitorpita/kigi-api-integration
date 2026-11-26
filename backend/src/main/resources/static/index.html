@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kigi API Explorer</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 16px; color: #1f2933; }
+  h1 { font-size: 1.4rem; }
+  button, select, input { font: inherit; padding: 6px 12px; border: 1px solid #bcc5d0; border-radius: 6px; background: #fff; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; opacity: .5; }
+  button.ativo { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+  .barra { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
+  #status { min-height: 1.5em; }
+  #status.erro { color: #b91c1c; }
+  .colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+  .rolagem { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e4e7eb; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr:focus { background: #eff6ff; }
+  pre { background: #f5f7fa; padding: 12px; border-radius: 6px; overflow: auto; max-height: 70vh; margin: 0; }
+</style>
+</head>
+<body>
+<h1>Kigi API Explorer</h1>
+
+<div class="barra">
+  <button id="abaPessoas" class="ativo">Pessoas</button>
+  <button id="abaProdutos">Produtos</button>
+  <button id="abaMovimentacoes">Movimentações</button>
+  <select id="tipo" aria-label="Tipo de pessoa">
+    <option value="">Todos os tipos</option>
+    <option value="cliente">Clientes</option>
+    <option value="fornecedor">Fornecedores</option>
+    <option value="guia">Guias</option>
+  </select>
+</div>
+
+<form id="busca" class="barra">
+  <input id="id" placeholder="Buscar por ID" required>
+  <button>Buscar</button>
+</form>
+
+<div id="status" role="status"></div>
+
+<div class="colunas">
+  <section>
+    <div class="rolagem">
+      <table>
+        <thead id="cabecalho"></thead>
+        <tbody id="linhas"></tbody>
+      </table>
+    </div>
+    <div class="barra">
+      <button id="anterior">Anterior</button>
+      <span id="paginacao"></span>
+      <button id="proxima">Próxima</button>
+    </div>
+  </section>
+  <section>
+    <pre id="detalhe">Clique em uma linha para ver o detalhe.</pre>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const data = (v) => v ? new Date(v).toLocaleString('pt-BR') : '-';
+
+const recursos = {
+  pessoas: {
+    colunas: [
+      ['ID', p => p.id],
+      ['Nome', p => p.nome],
+      ['Tipos', p => (p.tipos_pessoa || []).join(', ')],
+      ['Cadastro', p => data(p.data_cadastro)]
+    ]
+  },
+  produtos: {
+    colunas: [
+      ['Referência', p => p.codigo_referencia],
+      ['Nome', p => p.nome],
+      ['Cadastro', p => data(p.data_cadastro)]
+    ]
+  },
+  movimentacoes: {
+    colunas: [
+      ['ID', m => m.id],
+      ['Nome', m => m.nome],
+      ['Cadastro', m => data(m.data_cadastro)]
+    ]
+  }
+};
+
+let recurso = 'pessoas';
+let pagina = 1;
+let pedidoLista = 0;
+let pedidoDetalhe = 0;
+
+function mostrarStatus(texto, erro = false) {
+  $('status').textContent = texto;
+  $('status').className = erro ? 'erro' : '';
+}
+
+async function consultar(url) {
+  const resposta = await fetch(url);
+  const corpo = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    const motivo = corpo?.mensagem || corpo?.detail || 'Erro na requisição.';
+    throw new Error(`${resposta.status}: ${motivo}`);
+  }
+  if (corpo === null) throw new Error('Resposta inválida do servidor.');
+  return corpo;
+}
+
+function criar(tag, texto) {
+  const elemento = document.createElement(tag);
+  elemento.textContent = texto ?? '-';
+  return elemento;
+}
+
+async function listar() {
+  const pedido = ++pedidoLista;
+  const params = new URLSearchParams({ pagina });
+  if (recurso === 'pessoas' && $('tipo').value) params.set('tipo', $('tipo').value);
+
+  const { colunas } = recursos[recurso];
+  const cabecalho = document.createElement('tr');
+  cabecalho.append(...colunas.map(([titulo]) => criar('th', titulo)));
+  $('cabecalho').replaceChildren(cabecalho);
+  $('linhas').replaceChildren();
+  $('paginacao').textContent = '';
+  $('anterior').disabled = $('proxima').disabled = true;
+  mostrarStatus('Carregando...');
+
+  try {
+    const resposta = await consultar(`/api/${recurso}?${params}`);
+    if (pedido !== pedidoLista) return;
+
+    const itens = resposta.itens || [];
+    for (const item of itens) {
+      const linha = document.createElement('tr');
+      linha.tabIndex = 0;
+      linha.append(...colunas.map(([, valor]) => criar('td', valor(item))));
+      linha.onclick = () => detalhar(item.id);
+      linha.onkeydown = (e) => { if (e.key === 'Enter') detalhar(item.id); };
+      $('linhas').append(linha);
+    }
+
+    const totalPaginas = Math.max(1, Math.ceil(resposta.total / resposta.por_pagina) || 1);
+    $('paginacao').textContent = `Página ${pagina} de ${totalPaginas}`;
+    $('anterior').disabled = pagina <= 1;
+    $('proxima').disabled = pagina >= totalPaginas;
+    mostrarStatus(itens.length ? `${resposta.total} registro(s)` : 'Nenhum registro encontrado.');
+  } catch (erro) {
+    if (pedido !== pedidoLista) return;
+    $('anterior').disabled = pagina <= 1;
+    mostrarStatus(erro.message, true);
+  }
+}
+
+async function detalhar(id) {
+  const pedido = ++pedidoDetalhe;
+  $('detalhe').textContent = 'Carregando...';
+  try {
+    const corpo = await consultar(`/api/${recurso}/${encodeURIComponent(id)}`);
+    if (pedido === pedidoDetalhe) $('detalhe').textContent = JSON.stringify(corpo, null, 2);
+  } catch (erro) {
+    if (pedido === pedidoDetalhe) $('detalhe').textContent = erro.message;
+  }
+}
+
+function trocarAba(novo) {
+  recurso = novo;
+  pagina = 1;
+  pedidoDetalhe++;
+  $('abaPessoas').classList.toggle('ativo', novo === 'pessoas');
+  $('abaProdutos').classList.toggle('ativo', novo === 'produtos');
+  $('abaMovimentacoes').classList.toggle('ativo', novo === 'movimentacoes');
+  $('tipo').hidden = novo !== 'pessoas';
+  $('id').value = '';
+  $('detalhe').textContent = 'Clique em uma linha para ver o detalhe.';
+  listar();
+}
+
+$('abaPessoas').onclick = () => trocarAba('pessoas');
+$('abaProdutos').onclick = () => trocarAba('produtos');
+$('abaMovimentacoes').onclick = () => trocarAba('movimentacoes');
+$('tipo').onchange = () => { pagina = 1; listar(); };
+$('anterior').onclick = () => { pagina--; listar(); };
+$('proxima').onclick = () => { pagina++; listar(); };
+$('busca').onsubmit = (e) => {
+  e.preventDefault();
+  const id = $('id').value.trim();
+  if (id) detalhar(id);
+};
+
+listar();
+</script>
+</body>
+</html>

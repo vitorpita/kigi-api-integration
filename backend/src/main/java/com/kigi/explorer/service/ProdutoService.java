@@ -1,7 +1,7 @@
 package com.kigi.explorer.service;
 
-import com.kigi.explorer.model.ProdutoDetalhe;
-import com.kigi.explorer.model.ProdutoListagemResponse;
+import com.kigi.explorer.dto.produto.ProdutoDetalhe;
+import com.kigi.explorer.dto.produto.ProdutoListagemResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -26,5 +26,7 @@ public class ProdutoService {
                 .retrieve()
                 .body(ProdutoDetalhe.class);
     }
+
+
 
 }

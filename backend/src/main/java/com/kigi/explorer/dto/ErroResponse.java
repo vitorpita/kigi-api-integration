@@ -1,4 +1,4 @@
-package com.kigi.explorer.model;
+package com.kigi.explorer.dto;
 
 public record ErroResponse(String mensagem) {
 }

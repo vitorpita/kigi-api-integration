@@ -1,4 +1,4 @@
-package com.kigi.explorer.model;
+package com.kigi.explorer.dto.pessoa;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.OffsetDateTime;
